@@ -18,19 +18,24 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "threads/synch.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
+
 
 static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
 
+struct lock process_lock;
+
 /* General process initializer for initd and other process. */
 static void
 process_init (void) {
 	struct thread *current = thread_current ();
+	lock_init(&process_lock);
 }
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
@@ -76,8 +81,7 @@ initd (void *f_name) {
 tid_t
 process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	/* Clone current thread to new thread.*/
-	return thread_create (name,
-			PRI_DEFAULT, __do_fork, thread_current ());
+	return thread_create (name, PRI_DEFAULT, __do_fork, thread_current ());
 }
 
 #ifndef VM
@@ -87,14 +91,14 @@ static bool
 duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	struct thread *current = thread_current ();
 	struct thread *parent = (struct thread *) aux;
-	void *parent_page;
+	//void *parent_page;
 	void *newpage;
 	bool writable;
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
 
 	/* 2. Resolve VA from the parent's page map level 4. */
-	parent_page = pml4_get_page (parent->pml4, va);
+	//parent_page = pml4_get_page (parent->pml4, va);
 
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
@@ -175,6 +179,8 @@ process_exec (void *f_name) {
 
 	/* We first kill the current context */
 	process_cleanup ();
+		struct thread *curr = thread_current ();
+
 
 	/* And then load the binary */
 	success = load (file_name, &_if);
@@ -211,11 +217,17 @@ process_wait (tid_t child_tid UNUSED) {
 void
 process_exit (void) {
 	struct thread *curr = thread_current ();
-	/* TODO: Your code goes here.
-	 * TODO: Implement process termination message (see
-	 * TODO: project2/process_termination.html).
-	 * TODO: We recommend you to implement process resource cleanup here. */
-
+	
+	/* TODO: Your code goes here. */
+	lock_acquire(&process_lock);
+    list_remove(&(curr->child_elem));
+    lock_release(&process_lock);
+	
+	/* Print termination message. */
+    if (curr->run_file != NULL)
+        printf("%s: exit(%d)\n", curr->name, curr->exit_status);	/* TODO: project2/process_termination.html). */
+	
+	/* TODO: We recommend you to implement process resource cleanup here. */
 	process_cleanup ();
 }
 
@@ -335,10 +347,19 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());
 
+	/* Make a copy of file_name for parsing */
+	char *fn_copy = palloc_get_page (0); // 임시 버퍼 할당
+	char *save_ptr; // strtok_r을 위한 저장 포인터 | 토큰화된 문자열을 저장
+
+	if (fn_copy == NULL)
+		goto done;
+	strlcpy(fn_copy, file_name, PGSIZE);
+	char *prog_name = strtok_r(fn_copy, " ", &save_ptr);
+
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	file = filesys_open (prog_name);
 	if (file == NULL) {
-		printf ("load: %s: open failed\n", file_name);
+		printf ("load: %s: open failed\n", prog_name);
 		goto done;
 	}
 
@@ -350,7 +371,7 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_version != 1
 			|| ehdr.e_phentsize != sizeof (struct Phdr)
 			|| ehdr.e_phnum > 1024) {
-		printf ("load: %s: error loading executable\n", file_name);
+		printf ("load: %s: error loading executable\n", prog_name);
 		goto done;
 	}
 
@@ -416,15 +437,70 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	
+	/* Argument parsing and pushing to the stack */
+	// 현재 스레드의 이름(thread->name)을 복사해 토큰화 준비
+	char *token;
+	char *argv[128];
+	int argc = 0;
+
+	if (fn_copy == NULL)
+		return false; // 실패 시 false 반환
+
+	/* Tokenize arguments */
+	strlcpy(fn_copy, file_name, PGSIZE);
+	token = strtok_r(fn_copy, " ", &save_ptr);
+	while (token != NULL) {
+		argv[argc++] = token;
+		token = strtok_r(NULL, " ", &save_ptr);
+	}
+
+	uintptr_t rsp = if_->rsp;
+
+	/* Push arguments to stack (in reverse order) */
+	char *arg_ptrs[128];
+	for (int i = argc - 1; i >= 0; i--) {
+		size_t len = strlen(argv[i]) + 1;
+		if_->rsp -= len;
+		memcpy((void *)if_->rsp, argv[i], len);
+		arg_ptrs[i] = (char *)if_->rsp;
+	}
+
+	/* Word-align */
+	while (if_-> rsp % 8 != 0)
+		if_-> rsp--;
+
+	/* Push null sentinel */
+	if_-> rsp -= sizeof(char *);
+	*(char **)if_-> rsp = NULL;
+
+	/* Push argument pointers */
+	for (int i = argc - 1; i >= 0; i--) {
+		if_->rsp -= sizeof(char *);
+		*(char **)if_->rsp = arg_ptrs[i];
+	}
+
+	/* Push argv (char **) */
+	char **argv_addr = (char **)if_->rsp;
+	if_->rsp -= sizeof(char **);
+	*(char ***)if_->rsp = argv_addr;
+
+	/* Push argc */
+	if_->rsp -= sizeof(int);
+	*(int *)if_->rsp = argc;
+
+	/* Push fake return address */
+	if_->rsp -= sizeof(void *);
+	*(void **)if_->rsp = NULL;
 
 	success = true;
 
 done:
 	/* We arrive here whether the load is successful or not. */
 	file_close (file);
+	palloc_free_page (fn_copy);
 	return success;
 }
-
 
 /* Checks whether PHDR describes a valid, loadable segment in
  * FILE and returns true if so, false otherwise. */
@@ -546,9 +622,13 @@ setup_stack (struct intr_frame *if_) {
 		if (success)
 			if_->rsp = USER_STACK;
 		else
-			palloc_free_page (kpage);
+			palloc_free_page (kpage);	
 	}
-	return success;
+	// 추가 
+	/*  예외발생 시 함수 종료 (매핑 실패,  페이지 할당 실패 등)  */
+		if (!success) // success 응답을 받아오지 못했을 경우
+			return false; // false 리턴. 
+	return true; // 그게 아니라면 true 리턴.
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
