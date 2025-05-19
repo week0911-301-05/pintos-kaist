@@ -305,6 +305,9 @@ thread_exit (void) {
 	process_exit ();
 #endif
 
+	// TODO: Close all file
+	// TODO: Deallocate the FDT
+
 	/* Just set our status to dying and schedule another process.
 	   We will be destroyed during the call to schedule_tail(). */
 	intr_disable ();
@@ -383,15 +386,14 @@ thread_get_recent_cpu (void) {
 	return thread_current()->recent_cpu * 100;
 }
 
-/* Idle thread.  Executes when no other thread is ready to run.
-
-   The idle thread is initially put on the ready list by
-   thread_start().  It will be scheduled once initially, at which
-   point it initializes idle_thread, "up"s the semaphore passed
-   to it to enable thread_start() to continue, and immediately
-   blocks.  After that, the idle thread never appears in the
-   ready list.  It is returned by next_thread_to_run() as a
-   special case when the ready list is empty. */
+/*  Idle thread.  Executes when no other thread is ready to run.
+    The idle thread is initially put on the ready list by
+    thread_start().  It will be scheduled once initially, at which
+    point it initializes idle_thread, "up"s the semaphore passed
+    to it to enable thread_start() to continue, and immediately
+    blocks.  After that, the idle thread never appears in the
+    ready list.  It is returned by next_thread_to_run() as a
+    special case when the ready list is empty. */
 static void
 idle (void *idle_started_ UNUSED) {
 	struct semaphore *idle_started = idle_started_;
@@ -405,17 +407,15 @@ idle (void *idle_started_ UNUSED) {
 		thread_block ();
 
 		/* Re-enable interrupts and wait for the next one.
-
-		   The `sti' instruction disables interrupts until the
-		   completion of the next instruction, so these two
-		   instructions are executed atomically.  This atomicity is
-		   important; otherwise, an interrupt could be handled
-		   between re-enabling interrupts and waiting for the next
-		   one to occur, wasting as much as one clock tick worth of
-		   time.
-
-		   See [IA32-v2a] "HLT", [IA32-v2b] "STI", and [IA32-v3a]
-		   7.11.1 "HLT Instruction". */
+			The `sti' instruction disables interrupts until the
+			completion of the next instruction, so these two
+			instructions are executed atomically.  This atomicity is
+			important; otherwise, an interrupt could be handled
+			between re-enabling interrupts and waiting for the next
+			one to occur, wasting as much as one clock tick worth of
+			time.
+			See [IA32-v2a] "HLT", [IA32-v2b] "STI", and [IA32-v3a]
+			7.11.1 "HLT Instruction". */
 		asm volatile ("sti; hlt" : : : "memory");
 	}
 }
@@ -451,13 +451,24 @@ init_thread (struct thread *t, const char *name, int priority) {
 	/* Initializes data structure for priority donation */
 	t->wait_on_lock = NULL;
 	list_init(&t->donations);
+
+	// /* Initializes FDT */
+	// // t->fdt = (struct file**)malloc(64 * sizeof(struct file*));
+	// for (int i = 0; i < 64; i++) {
+	// 	t->fdt[i] = NULL;
+	// }
+	// /* Reserve fd0, fd1 for stdin, stdout */
+	// // t->fdt[0] = stdin;
+	// // t->fdt[1] = stdout;
+	// // t->fdt[2] = stderr;
+	// t->next_fd = 2;
 }
 
-/* Chooses and returns the next thread to be scheduled.  Should
-   return a thread from the run queue, unless the run queue is
-   empty.  (If the running thread can continue running, then it
-   will be in the run queue.)  If the run queue is empty, return
-   idle_thread. */
+/* Chooses and returns the next thread to be scheduled. Should
+ * return a thread from the run queue, unless the run queue is
+ * empty.  (If the running thread can continue running, then it
+ * will be in the run queue.)  If the run queue is empty, return
+ * idle_thread. */
 static struct thread *
 next_thread_to_run (void) {
 	if (list_empty (&ready_list))
@@ -467,6 +478,9 @@ next_thread_to_run (void) {
 }
 
 /* Use iretq to launch the thread */
+/* 1. Restoring registers: intr_frame에 저장된 레지스터를 다시 로딩
+ * 2. Reconstructinf stack: 스택 포인터를 유저 모드 스택으로 전환
+ * 3. Change CPU mode: iretq 인스트럭션으로 유저 모드로 점프 */ 
 void
 do_iret (struct intr_frame *tf) {
 	__asm __volatile(

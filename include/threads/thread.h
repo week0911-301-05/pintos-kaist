@@ -9,6 +9,7 @@
 #include "vm/vm.h"
 #endif
 
+// #define USERPROG true; // for debugging
 
 /* States in a thread's life cycle. */
 enum thread_status {
@@ -115,6 +116,10 @@ struct thread {
 	/* Values for the advanced scheduler */
 	int nice;
 	int recent_cpu;
+
+	/* File Descriptor Table */
+	struct file *fdt[64];					/* List of pointer to struct file */
+	int next_fd;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */

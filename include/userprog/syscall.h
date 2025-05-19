@@ -1,9 +1,31 @@
 #ifndef USERPROG_SYSCALL_H
 #define USERPROG_SYSCALL_H
 
+#include <stdbool.h>
+#include <debug.h>
+#include <stddef.h>
+
+/* Process identifier. */
+typedef int pid_t;
+#define PID_ERROR ((pid_t) -1)
+
+struct lock *filesys_lock;
+
 void syscall_init (void);
 
-void halt (void);
-void exit(int status);
+// void halt (void) NO_RETURN;
+// void exit (int status) NO_RETURN;
+// pid_t fork (const char *thread_name);
+// int exec (const char *cmd_file);
+// int wait (pid_t pid);
+// bool create (const char *file, unsigned initial_size);
+// bool remove (const char *file);
+// int open (const char *file);
+// int filesize (int fd);
+// int read (int fd, void *buffer, unsigned length);
+// int write (int fd, const void *buffer, unsigned length);
+// void seek (int fd, unsigned position);
+// unsigned tell (int fd);
+// void close (int fd);
 
 #endif /* userprog/syscall.h */

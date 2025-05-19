@@ -211,20 +211,17 @@ process_exec (void *f_name) {
 		return -1;
 
 	/* Start switched process. */
-	do_iret (&_if); // asm volatile blabla
+	do_iret (&_if); // Change the mode of user program: user mode ←→ kernel mode
 	NOT_REACHED ();
 }
 
 
-/* Waits for thread TID to die and returns its exit status.  If
- * it was terminated by the kernel (i.e. killed due to an
+/* Waits for thread TID to die and returns its exit status.
+ * If it was terminated by the kernel (i.e. killed due to an
  * exception), returns -1.  If TID is invalid or if it was not a
  * child of the calling process, or if process_wait() has already
  * been successfully called for the given TID, returns -1
- * immediately, without waiting.
- *
- * This function will be implemented in problem 2-2.  For now, it
- * does nothing. */
+ * immediately, without waiting. */
 int
 process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
@@ -233,6 +230,18 @@ process_wait (tid_t child_tid UNUSED) {
 	for (int i = 0; i < 1000000000; i++) {
 	}
 	return -1;
+	// Search the descriptor of the child process by using child_tid.
+	// The caller blocks until the child process exits.
+	// Once child process exits, deallocate the descriptor of child process and returns exit status of the child process.
+
+	// Add a semaphore for “wait” to thread structure.
+	// Semaphore is initialized to 0 when the thread is first created.
+	// In wait(tid), call sema_down for the semaphore of tid.
+	// In exit() of process tid, call sema_up. 
+	// Where do we need to place sema_down and sema_up?
+
+	// Add a field to denote the exit status to the thread structure.
+
 }
 
 /* Exit the process. This function is called by thread_exit (). */
